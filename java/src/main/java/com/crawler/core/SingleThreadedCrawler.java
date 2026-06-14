@@ -11,7 +11,12 @@ import com.crawler.url.Scope;
 import com.crawler.url.UrlNormalizer;
 
 import java.net.URI;
-import java.util.*;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 
 public class SingleThreadedCrawler implements Crawler {
 
