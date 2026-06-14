@@ -1,0 +1,16 @@
+# Gradle
+.gradle/
+build/
+
+# IntelliJ IDE
+.idea/
+*.iml
+out/
+.idea/*.xml
+*.xml
+
+# OS
+.DS_Store
+
+# Keep the Gradle wrapper jar file
+!gradle/wrapper/gradle-wrapper.jar
