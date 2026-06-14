@@ -2,6 +2,7 @@ package com.crawler.core;
 
 import com.crawler.core.config.CrawlerConfig;
 import com.crawler.core.model.CrawlResult;
+import com.crawler.core.model.CrawlSummary;
 import com.crawler.fetch.model.FetchResponse;
 import com.crawler.fetch.Fetcher;
 import com.crawler.output.ResultSink;
@@ -25,6 +26,10 @@ public class SingleThreadedCrawler implements Crawler {
     private final Set<URI> visited = new HashSet<>();       // canonical URLs already claimed
     private int pagesFetched = 0;                           // for the maxPages cap
 
+    private int pagesCrawled = 0;
+    private int skipped = 0;
+    private int failed = 0;
+
     /**
      * Stores the collaborators; performs no crawling itself. The crawl() method must be called to start the crawl.
      */
@@ -43,11 +48,14 @@ public class SingleThreadedCrawler implements Crawler {
      * {@code throws InterruptedException} clause since this implementation is single-threaded and does not block.
      */
     @Override
-    public void crawl() {
+    public CrawlSummary crawl() {
         try {
-            normalizer.normalize(config.seed()).ifPresentOrElse(seed -> {
-                visited.add(seed);
-                frontier.addLast(seed);
+            Optional<URI> normalizedSeedOptional = normalizer.normalize(config.seed());
+
+            if (normalizedSeedOptional.isPresent()) {
+                URI  normalizedSeed = normalizedSeedOptional.get();
+                visited.add(normalizedSeed);
+                frontier.addLast(normalizedSeed);
 
                 while (!frontier.isEmpty() && (config.maxPages() == 0 || pagesFetched < config.maxPages())) {
                     final URI next = frontier.pollFirst();
@@ -55,11 +63,12 @@ public class SingleThreadedCrawler implements Crawler {
 
                     process(next);
                 }
-                sink.accept("Finished crawling. Pages fetched: " + pagesFetched);
-            }, () -> {
+
+                return new CrawlSummary(pagesCrawled, skipped, failed);
+            } else {
                 System.err.println("Seed URL could not be normalized: " + config.seed());
                 throw new RuntimeException("Seed URL could not be normalized: " + config.seed());
-            });
+            }
         } catch(Exception e) {
             throw new RuntimeException(e);
         }
@@ -94,13 +103,24 @@ public class SingleThreadedCrawler implements Crawler {
     private void process(URI url) {
         final FetchResponse fetchResponse = fetcher.fetch(url);
 
-        if (fetchResponse instanceof FetchResponse.Html html) {
-            final List<URI> pageLinks = extractor.extract(html.body(), html.finalUrl());
+        switch (fetchResponse) {
+            case FetchResponse.Html html -> {
+                pagesCrawled++;
+                final List<URI> pageLinks = extractor.extract(html.body(), html.finalUrl());
 
-            sink.accept(new CrawlResult(html.finalUrl(), pageLinks));
+                sink.accept(new CrawlResult(html.finalUrl(), pageLinks));
 
-            for (URI link : pageLinks) {
-                enqueue(link);
+                for (URI link : pageLinks) {
+                    enqueue(link);
+                }
+            }
+            case FetchResponse.Skipped s -> {
+                skipped++;
+                System.err.println("Skipped URL: " + s.finalUrl() + " (content-type: " + s.contentType() + ")");
+            }
+            case FetchResponse.Failed f -> {
+                failed++;
+                System.err.println("Failed URL: " + f.url() + " (reason: " + f.reason() + ")");
             }
         }
     }

@@ -1,6 +1,7 @@
 package com.crawler.core;
 
 import com.crawler.core.model.CrawlResult;
+import com.crawler.core.model.CrawlSummary;
 
 public interface Crawler {
 
@@ -10,6 +11,6 @@ public interface Crawler {
      *
      * @throws InterruptedException if interrupted while waiting for in-flight work to finish
      */
-    void crawl() throws InterruptedException;
+    CrawlSummary crawl() throws InterruptedException;
 }
 

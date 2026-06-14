@@ -3,6 +3,7 @@ package com.crawler.cli;
 import com.crawler.core.Crawler;
 import com.crawler.core.config.CrawlerConfig;
 import com.crawler.core.SingleThreadedCrawler;
+import com.crawler.core.model.CrawlSummary;
 import com.crawler.fetch.Fetcher;
 import com.crawler.fetch.HttpClientFetcher;
 import com.crawler.output.JsonLinesSink;
@@ -133,8 +134,12 @@ public final class CrawlCommand implements Callable<Integer> {
 
         try {
             sink.accept("Started crawler with config: " + config);
-            crawler.crawl();
-            return 0;
+            final CrawlSummary summary = crawler.crawl();
+
+            sink.accept(String.format("Finished crawling: %d crawled, %d skipped, %d failed",
+                    summary.pagesCrawled(), summary.skipped(), summary.failed()));
+
+            return summary.pagesCrawled() > 0 ? 0 : 1;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             System.err.println("Crawler interrupted");
