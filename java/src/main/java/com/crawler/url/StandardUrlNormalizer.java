@@ -12,7 +12,7 @@ public class StandardUrlNormalizer implements UrlNormalizer {
     private static final int HTTPS_DEFAULT_PORT = 443;
 
     @Override
-    public Optional<URI> normalize(URI url) throws URISyntaxException {
+    public Optional<URI> normalize(URI url) {
         // no scheme or host => drop
         if (url.getScheme() == null || url.getHost() == null) {
             return Optional.empty();
@@ -63,7 +63,11 @@ public class StandardUrlNormalizer implements UrlNormalizer {
             reconstructedUrlBuilder.append(urlWithNormalizedPath.getQuery());
         }
 
-        return Optional.of(new URI(reconstructedUrlBuilder.toString()));
+        try {
+            return Optional.of(new URI(reconstructedUrlBuilder.toString()));
+        } catch (URISyntaxException e) {
+            return Optional.empty();
+        }
     }
 }
 

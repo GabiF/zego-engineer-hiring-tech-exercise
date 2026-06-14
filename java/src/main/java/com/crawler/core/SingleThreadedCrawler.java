@@ -66,10 +66,13 @@ public class SingleThreadedCrawler implements Crawler {
 
                 return new CrawlSummary(pagesCrawled, skipped, failed);
             } else {
+                failed++;
                 System.err.println("Seed URL could not be normalized: " + config.seed());
-                throw new RuntimeException("Seed URL could not be normalized: " + config.seed());
+
+                return new CrawlSummary(pagesCrawled, skipped, failed);
             }
-        } catch(Exception e) {
+        } catch (Exception e) {
+            System.err.println("Unexpected error occurred: " + e.getMessage());
             throw new RuntimeException(e);
         }
     }
@@ -79,14 +82,10 @@ public class SingleThreadedCrawler implements Crawler {
      * normalize -> in scope? -> claim in {@code visited} -> add to {@code frontier}
      */
     private void enqueue(URI candidate) {
-        try {
-            normalizer.normalize(candidate)
-                    .filter(scope::inScope)
-                    .filter(visited::add)
-                    .ifPresent(frontier::addLast);
-        } catch (Exception e) {
-            System.err.println("Error normalizing URL: " + candidate + " - " + e.getMessage());
-        }
+        normalizer.normalize(candidate)
+                .filter(scope::inScope)
+                .filter(visited::add)
+                .ifPresent(frontier::addLast);
     }
 
     /**

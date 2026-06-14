@@ -4,9 +4,9 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 
 import java.net.URI;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 public class JsoupLinkExtractor implements LinkExtractor {
 
@@ -14,13 +14,15 @@ public class JsoupLinkExtractor implements LinkExtractor {
 
     @Override
     public List<URI> extract(String html, URI baseUrl) {
-        HashSet<URI> links = new LinkedHashSet<>();
+        Set<URI> links = new LinkedHashSet<>();
 
         final Document doc = Jsoup.parse(html, baseUrl.toString());
         doc.select("a[href]").forEach(anchor -> {
             try {
                 final String absoluteUrl = anchor.absUrl("href");
-                links.add(new URI(absoluteUrl));
+                if (!absoluteUrl.isBlank()) {
+                    links.add(new URI(absoluteUrl));
+                }
             } catch (Exception e) {
                 // Explicitly deciding to ignore. In a production system, would at least log a warning
             }

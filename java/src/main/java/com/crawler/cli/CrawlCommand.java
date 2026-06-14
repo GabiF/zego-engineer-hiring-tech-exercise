@@ -1,8 +1,8 @@
 package com.crawler.cli;
 
+import com.crawler.core.ConcurrentCrawler;
 import com.crawler.core.Crawler;
 import com.crawler.core.config.CrawlerConfig;
-import com.crawler.core.SingleThreadedCrawler;
 import com.crawler.core.model.CrawlSummary;
 import com.crawler.fetch.Fetcher;
 import com.crawler.fetch.HttpClientFetcher;
@@ -110,6 +110,11 @@ public final class CrawlCommand implements Callable<Integer> {
             return 3;
         }
 
+        if (respectRobots) {
+            System.err.println("Warning: --respect-robots was requested but robots.txt enforcement is not yet implemented; " +
+                    "proceeding without it");
+        }
+
         final CrawlerConfig config = new CrawlerConfig(
                 seed,
                 concurrency,
@@ -130,7 +135,7 @@ public final class CrawlCommand implements Callable<Integer> {
             case json -> new JsonLinesSink(System.out);
         };
 
-        final Crawler crawler = new SingleThreadedCrawler(config, fetcher, extractor, normalizer, scope, sink);
+        final Crawler crawler = new ConcurrentCrawler(config, fetcher, extractor, normalizer, scope, sink);
 
         try {
             sink.accept("Started crawler with config: " + config);
