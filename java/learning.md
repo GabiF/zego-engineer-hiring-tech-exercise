@@ -143,6 +143,7 @@ Sitemap: https://example.com/sitemap.xml
 Knowing when you're done (queue empty AND no workers still finding new links) is surprisingly tricky 
 once you add concurrency. And every URL must be processed exactly once.
 
+
 # Breaking down the problem statement (clause by clause)
 
 Deconstructing the prompt surfaces both the explicit and the hidden requirements.
@@ -297,26 +298,26 @@ The key design principle: dependency injection / interfaces at the boundaries (e
 ## The realistic choice: Java vs JavaScript (by the *hard* parts)
 The easy parts (HTTP calls, arg parsing, I/O) are a wash. The decision rides on four hard areas plus testing.
 
-### HTML parsing & link extraction → Java
+HTML parsing & link extraction → Java
 * Java: **jsoup** — best-in-class lenient parser; crucially `el.absUrl("href")` / `attr("abs:href")` resolves relative URLs against the document base **and respects `<base href>`**, solving part of the hardest accuracy problem during extraction.
 * Node: cheerio (query-only — you resolve URLs yourself) / parse5 / jsdom. Good, but no built-in resolution.
 
-### URL resolution & normalization → Node
+URL resolution & normalization → Node
 * Node: built-in **WHATWG `URL`** (`new URL(href, base)`) — the *same algorithm browsers use*. Auto-lowercases host/scheme, strips default ports, handles punycode/percent-encoding, parses messy real-world hrefs.
 * Java: `java.net.URI` is RFC-3986-strict — doesn't lowercase host, doesn't strip default ports, and **throws** on URLs that browsers accept. (Mitigation below.)
 
-### Domain scoping (Public Suffix List) → tie
+Domain scoping (Public Suffix List) → tie
 * Java: **Guava `InternetDomainName`** (`topPrivateDomain()`). Node: `tldts` / `psl`.
 
-### Concurrency → split decision
+Concurrency → split decision
 * Node: single-threaded event loop → I/O concurrency is effortless and the **visited set needs no locks** (a whole class of bugs simply can't happen). But bounding leans on libs (`p-limit` / `p-queue`).
 * Java: **virtual threads (21+)** make I/O concurrency cheap with simple blocking code; the rich toolkit (`Semaphore`, `ConcurrentHashMap.newKeySet()`, `Phaser` / `AtomicInteger` + `CountDownLatch`) lets you **demonstrate the "patterns" the brief rewards**. Price: you must get shared state right.
 
-### Testing (graded) → Java
+Testing (graded) → Java
 * Java: JUnit 5 + Mockito + AssertJ + **WireMock** (stand up a fake linked site, assert crawl behaviour deterministically).
 * Node: Vitest / Jest + `nock` / `msw` / undici `MockAgent`. Good, slightly less mature for HTTP integration tests.
 
-### Scorecard
+Scorecard
 | Hard part | Winner |
 |---|---|
 | HTML parsing (jsoup `abs:href`) | Java |
@@ -354,9 +355,10 @@ You don't have to build these, but discussing them earns marks:
 A path that goes concepts → breakdown → detailed design → build:
 1. ✅ Concepts & problem breakdown — covered in this document.
 2. ✅ Detailed design — see "Detailed design (Java)" above.
-3. ⏳ Project skeleton — Gradle project, packages, picocli entrypoint, dependencies (jsoup, Guava, picocli; JUnit5 + Mockito + WireMock for tests). **← next**
-4. Implement incrementally — single-threaded core first, then the virtual-thread engine.
-5. Tests + production polish — README, CI (GitHub Actions), formatting (Spotless), Docker.
+3. ✅ Project skeleton — Gradle project, packages, picocli entrypoint, dependencies (jsoup, Guava, picocli; JUnit5 + Mockito + WireMock for tests). **← next**
+4. ✅ Implement incrementally — single-threaded core first, then the virtual-thread engine.
+5. ✅ Tests
+6. ✅ Production polish — e.g. README, CI (GitHub Actions), formatting (Spotless), Docker.
 
 ## Decisions (made)
 * **Language: Java 21+.** Runner-up Node / JS. Full rationale in "A note on language choice".
@@ -377,8 +379,8 @@ Everything before and after the engine is **identical** in both versions; only t
 **The lifecycle (main steps):**
 1. **Parse args** (picocli) → build a `CrawlerConfig`.
 2. **Validate the seed URL** (well-formed, `http`/`https`); bail early if not.
-3. **Wire dependencies** — `Fetcher`, `LinkExtractor`, `UrlNormalizer`, `HostScope` (from the seed host), `output.com.crawler.ResultSink`.
-4. **(Optional) robots.txt** — fetch once for the host, parse + cache.
+3. **Wire dependencies** — `Fetcher`, `LinkExtractor`, `UrlNormalizer`, `HostScope` (from the seed host), `ResultSink`.
+4. **(Optional) robots.txt** — fetch once for the host, parse + cache rules.
 5. **Seed the frontier** with the normalized seed URL.
 6. **Run the engine** (single-threaded loop *or* concurrent) — the only part that differs.
 7. **Flush output / summary**, then exit.
@@ -388,7 +390,7 @@ flowchart TD
     A(["CLI: crawl https://example.com --concurrency 16"]) --> B["picocli parses args → CrawlerConfig"]
     B --> C{"Seed URL valid<br/>& http/https?"}
     C -->|no| E(["print error → exit 2"])
-    C -->|yes| D["Wire deps: Fetcher, LinkExtractor,<br/>UrlNormalizer, HostScope, output.com.crawler.ResultSink"]
+    C -->|yes| D["Wire deps: Fetcher, LinkExtractor,<br/>UrlNormalizer, HostScope, ResultSink"]
     D --> F["(optional) GET /robots.txt<br/>parse + cache rules"]
     F --> G["normalize seed → add to frontier"]
     G --> H[["RUN ENGINE<br/>(single-threaded OR concurrent)"]]
@@ -408,7 +410,7 @@ flowchart TD
     D --> E{"2xx text/html?"}
     E -->|"no (non-HTML / 4xx / 5xx / off-domain redirect)"| B
     E -->|yes| F["parse HTML → extract all hrefs<br/>(resolve vs base + &lt;base href&gt;)"]
-    F --> G["output.com.crawler.ResultSink: print page URL + ALL links"]
+    F --> G["ResultSink: print page URL + ALL links"]
     G --> H["for each link: normalize →<br/>in scope? → not in visited?"]
     H --> I["visited.add(link) + frontier.add(link)"]
     I --> B
@@ -440,7 +442,7 @@ flowchart TD
       P2 --> P3["inFlight.release()"]
       P3 --> P4{"2xx text/html?"}
       P4 -->|yes| P5["parse + extract links"]
-      P5 --> P6["output.com.crawler.ResultSink: print page + ALL links"]
+      P5 --> P6["ResultSink: print page + ALL links"]
       P6 --> P7["for each link..."]
       P4 -->|no| P8["skip / record"]
       P7 --> P9["finally: pending--"]
@@ -524,9 +526,9 @@ com.example.crawler
 │   ├── Scope.java              (interface)
 │   └── HostScope.java
 └── output/         # reporting
-    ├── output.com.crawler.ResultSink.java         (interface)
+    ├── ResultSink.java         (interface)
     ├── TextSink.java
-    └── output.com.crawler.JsonLinesSink.java
+    └── JsonLinesSink.java
 ```
 
 ## Core domain types
@@ -541,7 +543,7 @@ public record CrawlerConfig(
         Duration politenessDelay) { // per-request delay; ZERO = none
 }
 
-/** What we print for each crawled page: its URL + every link found on it. */
+/** What we print for each crawled page: its URL + every link on it. */
 public record CrawlResult(URI pageUrl, List<URI> links) {}
 ```
 
@@ -571,7 +573,7 @@ public interface Scope {
     boolean inScope(URI normalizedUrl);
 }
 
-public interface output.com.crawler.ResultSink {
+public interface ResultSink {
     void accept(CrawlResult result);    // thread-safe; emits one page's block atomically
 }
 ```
@@ -591,6 +593,24 @@ Why a sealed `FetchResponse`: the engine `switch`-es over it with exhaustive pat
 
 This pure function is the single highest-value unit-test target.
 
+## Link extraction — `JsoupLinkExtractor` (design notes)
+`JsoupLinkExtractor.extract(String html, URI baseUrl) → List<URI>` is the **resolution** stage: turn one page's `<a href>` attributes into absolute, de-duplicated `URI`s. It is stateless (so a single instance is shared safely across virtual threads) and, because its input is a `String`, a pure no-network unit target — the second-highest-value test after the normalizer.
+
+Algorithm:
+1. `Jsoup.parse(html, baseUrl.toString())` — passing the base is what enables `absUrl` / `abs:href` resolution and makes jsoup honour a `<base href>` in the head.
+2. `select("a[href]")` — anchors only (per the brief); `[href]` skips `<a name=…>` with no link.
+3. For each element, `el.absUrl("href")` → absolute URL string (relative, protocol-relative `//host`, and `.`/`..` all resolved); `""` when unresolvable.
+4. Drop blanks, convert to `URI`, **de-duplicate preserving first-seen order** (`LinkedHashSet<URI>`).
+5. Return an **immutable** list.
+
+**Explicit decisions** (deliberate; documented so a reviewer sees the reasoning):
+* **Scheme policy — faithful:** return *every* resolved href regardless of scheme (`mailto:`, `tel:`, `javascript:` included). The brief says print *all* the URLs on a page, and the extractor's output **is** the printed list; *following* is filtered separately downstream (the normalizer drops non-http(s), scope drops off-host). The extractor stays a faithful "what's on the page" reporter and makes no policy calls.
+* **Same-page fragments — keep:** `#section` resolves to `…/page#section` and is returned as-is. Keeps the extractor strictly about *parsing*, with no special-casing (cleaner code); the normalizer strips the fragment later, so a self-link collapses to the page itself (already visited) and is never re-followed.
+* **Unparseable href — skip (don't throw):** if `URI.create` rejects what jsoup returned (e.g. a stray space), skip that one link and continue — one malformed `href` must never abort a page. In production this would log a **warning** (a recoverable, expected condition — not an *error*, which implies the flow is irrecoverably broken); here we just skip.
+* **Immutability & nullability:** return an immutable `List<URI>`; **empty list (never null)** when a page has no links.
+
+Spec / tests: see *Tests → `JsoupLinkExtractorTest`*.
+
 ## Scope — exact-host matching
 ```java
 public final class HostScope implements Scope {
@@ -604,7 +624,7 @@ public final class HostScope implements Scope {
 }
 ```
 * Strict "no subdomains" reading → **exact host equality**. This correctly excludes `www.example.com` / `blog.example.com`, and avoids the classic `endsWith("example.com")` bug that wrongly matches `notexample.com`.
-* **www / redirect caveat:** if the seed is `example.com` but it (or its links) point to `www.example.com`, those are out of scope. Document this; a `--include-www` toggle, or seeding the canonical host, is the pragmatic escape hatch.
+* **www / apex asymmetry + redirect trap (important):** exact-host matching excludes anything that isn't the seed's host, so seeding `example.com` excludes `www.example.com` (a subdomain, as required) and seeding `www.example.com` excludes the apex `example.com` (a super-domain). The trap: seed the apex but the site canonicalises to `www` (301 → `www.example.com`); the fetcher follows the redirect, prints that one page, then drops every internal link (all on the out-of-scope `www` host) and the crawl stops after ~1 page. Options: (a) keep strict exact-host (default, predictable); (b) treat a leading `www.` as the apex in `HostScope` (strip it from both sides) behind a `--treat-www-as-apex` flag; (c) adopt the seed's post-redirect host as the scope after the first fetch (kills the trap); (d) eTLD+1 via Guava, which includes all subdomains (the multi-domain extension, not the strict reading). A bare `www.example.com` with no scheme is rejected by the CLI (`URI` gives it no host), so a scheme is required.
 * The multi-domain extension swaps `HostScope` for a `Scope` backed by a set of hosts, or Guava `InternetDomainName.topPrivateDomain()` (registrable-domain matching — which *would* include subdomains).
 
 ## Concurrency model — recommended: task-per-virtual-thread
@@ -615,9 +635,16 @@ Semaphore inFlight     = new Semaphore(config.maxConcurrentRequests()); // bound
 Set<URI> visited       = ConcurrentHashMap.newKeySet();                 // atomic dedupe + claim
 AtomicInteger pending  = new AtomicInteger();                           // submitted-but-not-done tasks
 CountDownLatch done    = new CountDownLatch(1);                         // tripped when pending hits 0
+
+public void crawl() throws InterruptedException {
+    submit(config.seed());
+    if (pending.get() == 0) return;  // seed invalid / out of scope
+    done.await();                    // blocks until the LAST in-flight task finishes
+    pool.shutdown();
+}
 ```
 
-Submit (claims a URL exactly once):
+Submit (claims a URL for processing at most once):
 ```java
 void submit(URI raw) {
     normalizer.normalize(raw)
@@ -655,16 +682,6 @@ void process(URI url) {
 }
 ```
 
-Run:
-```java
-public void crawl() throws InterruptedException {
-    submit(config.seed());
-    if (pending.get() == 0) return;  // seed invalid / out of scope
-    done.await();                    // blocks until the LAST in-flight task finishes
-    pool.shutdown();
-}
-```
-
 Why this design:
 * **Virtual threads** → one cheap thread per task; blocking `fetch()` is fine, no callback spaghetti.
 * **`Semaphore`** bounds *concurrent network requests* (resources + politeness), decoupled from thread count.
@@ -672,7 +689,7 @@ Why this design:
 * **`pending` counter + latch** solve the "knowing when to stop" problem precisely: we finish only when the last task completes, so we never exit while a worker might still enqueue children, and never hang.
 * **No explicit queue** — the executor *is* the frontier. (For distributed mode, extract `Frontier` + `VisitedSet` interfaces backed by Redis — see extensions.)
 
-**Output ordering:** concurrent workers writing to stdout would interleave. `output.com.crawler.ResultSink` emits each page's block as one synchronized write (build the full string, then one locked `print`), or pushes `CrawlResult`s onto a `BlockingQueue` drained by a single reporter thread. Output stays readable.
+**Output ordering:** concurrent workers writing to stdout would interleave. `ResultSink` emits each page's block as one synchronized write (build the full string, then one locked `print`), or pushes `CrawlResult`s onto a `BlockingQueue` drained by a single reporter thread. Output stays readable.
 
 ### Alternative: classic fixed worker-pool + `BlockingQueue`
 N threads `take()` from a shared queue and enqueue discoveries. Valid, but termination needs an idle-detector (active-workers == 0 && queue empty) or poison pills — the usual source of "exits early / hangs forever" bugs. With virtual threads, the counter approach above is simpler and just as fast.
@@ -681,11 +698,13 @@ N threads `take()` from a shared queue and enqueue discoveries. Valid, but termi
 Identical interfaces; the engine becomes a loop over an `ArrayDeque` with a plain `HashSet` visited — no executor, semaphore, or atomics. Nail correctness (normalization, scope, dedupe, termination) with fast unit tests, then swap in the concurrent engine. Nothing else changes.
 
 ## HTTP fetching (`HttpClientFetcher`)
-Built-in `java.net.http.HttpClient` (no extra dependency, plays nicely with virtual threads):
+Built-in `java.net.http.HttpClient` (no extra dependency, plays nicely with virtual threads via blocking calls):
 * `connectTimeout` on the client; per-request `timeout(config.requestTimeout())`.
 * `followRedirects(Redirect.NORMAL)`; read the **final** URL from `response.uri()` and re-check scope before parsing.
 * Inspect `statusCode()` (2xx only) and `Content-Type` (`text/html`) → map to `Html` / `Skipped` / `Failed`.
 * Set the `User-Agent` header from config.
+* **Testability seams:** the status/content-type → result mapping is the *pure* static `classify(...)`, and the blocking send sits behind a one-method `HttpSend` interface (injected via a package-private constructor). So the mapping and the `catch` blocks are unit-tested with no socket and no mocking of `HttpClient`; WireMock covers the real-I/O behaviour.
+* **`Failed` identity:** `Html`/`Skipped` are keyed by the post-redirect `finalUrl` (needed as the link-resolution base / dedupe key), but `Failed` keeps the **requested** URL — traceable to the enqueued link, and still in-scope even if a redirect left the domain — with the final URL appended to the `reason` (`HTTP 404 @ …`) when it differs.
 
 ## Configuration & CLI flags (picocli)
 | Flag | Default | Purpose |
@@ -724,7 +743,7 @@ https://example.com/about
 Tools: **JUnit 5, AssertJ, Mockito, WireMock**; **Gradle**; **JaCoCo** for coverage.
 
 **Unit (pure logic — highest value):**
-* `StandardUrlNormalizer`: fragment stripped; default port stripped; host/scheme lower-cased; `/a/../b` → `/b`; trailing-slash policy; query kept; `mailto:`/`tel:`/`javascript:`/`data:` dropped; protocol-relative resolved; **idempotency** (`normalize(normalize(x)) == normalize(x)`).
+* `StandardUrlNormalizer`: fragment stripped; default port stripped; host/scheme lower‑cased; `/a/../b` → `/b`; trailing-slash policy; query kept; `mailto:`/`tel:`/`javascript:`/`data:` dropped; protocol-relative resolved; **idempotency** (`normalize(normalize(x)) == normalize(x)`).
 * `HostScope`: exact host in; `www.`/`blog.` subdomain out; `notexample.com` out (no `endsWith` bug); different TLD out; case-insensitive host.
 * `JsoupLinkExtractor`: relative / absolute / protocol-relative; `<base href>` honoured; within-page dedupe; non-anchor ignored; malformed HTML; empty `href`.
 
@@ -743,3 +762,127 @@ Tools: **JUnit 5, AssertJ, Mockito, WireMock**; **Gradle**; **JaCoCo** for cover
 **Concurrency correctness:**
 * Generated graph (~1k pages), run repeatedly → visited count == unique pages; run completes (no deadlock / early exit).
 * Fake fetcher counts hits per URL; assert all == 1 (no duplicate fetches).
+
+# Single-threaded flow — concepts & code mapping
+
+A closer, single-threaded walkthrough of how a crawl actually runs. The concurrent engine is the same
+flow with the bookkeeping made thread-safe, so understanding this first makes `ConcurrentCrawler`
+obvious. (Complements the diagrams under *Detailed design (Java) → Execution flow*.)
+
+## The crawler has exactly two pieces of state
+* **Frontier** — the "to-do" list: URLs discovered but not yet processed.
+* **Visited** — the "already-dealt-with" set: URLs claimed so we never process them twice (prevents infinite loops on cycles like A→B→A).
+
+A URL moves through three states: **unknown → in the frontier (known, not done) → visited (done)**. The whole crawl is just shuffling URLs through those states until the frontier is empty.
+
+## The frontier: what it is and how to represent it
+Conceptually a **queue of work**. The data structure decides traversal order:
+* **FIFO queue** → **breadth-first** (level by level) — the natural default. In Java: `ArrayDeque<URI>` used as a queue (`addLast` / `pollFirst`).
+* **LIFO stack** → depth-first.
+* (Priority queue → best-first; only for advanced crawling.)
+
+The visited set is a `HashSet<URI>`.
+
+Two decisions worth making consciously:
+1. **When to mark visited** — at **enqueue time**, not dequeue time. The moment you decide to enqueue a URL, add it to `visited` too. This guarantees a URL is enqueued at most once, so the frontier never holds duplicates.
+2. **What's allowed into the frontier** — keep the invariant that **only "clean" URLs enter** (already normalized, in-scope, unseen). Then the dequeue side is dumb: pop and fetch, no re-checking. All filtering happens once, on the way in.
+
+## Step-by-step (single-threaded)
+**Setup (once):** normalize the seed → record it in `visited` → put it in the frontier. (The seed is in-scope by definition; it defines the host.)
+
+**Loop (until the frontier is empty):**
+1. **Take** the next URL from the frontier.
+2. **Fetch** it. The outcome is one of three: an HTML page (2xx `text/html`), something non-HTML to skip, or a failure (non-2xx / timeout / error).
+3. If **HTML**: **parse** and **extract every link**, resolved to absolute URLs.
+4. **Report** the page: emit the page URL + **all** links found on it (print all, including off-domain).
+5. For **each** extracted link, run the **enqueue filter**: normalize → (drop non-HTTP) → scope check (same host?) → visited check → survivors get `visited.add` + `frontier.add`.
+6. Loop.
+
+**Termination:** frontier empty = done. Single-threaded gets this for free (no other worker can be about to add URLs). This is the one place the concurrent version needs extra machinery (the `pending` counter).
+
+```
+  SETUP:  normalize(seed) ─► visited.add(seed) ─► frontier.add(seed)
+                                    │
+                                    ▼
+        ┌──────────────► is frontier empty? ──── yes ──►  DONE
+        │                        │ no
+        │                        ▼
+        │             url = frontier.poll()          (1) take work
+        │                        │
+        │                        ▼
+        │                 fetch(url)                  (2) network I/O
+        │              ┌──────────┼───────────────┐
+        │          HTML│   non-HTML│         failure│
+        │              ▼           ▼ skip           ▼ record & continue
+        │        extract links     └──────┬─────────┘
+        │              │                  │
+        │              ▼                  │
+        │   report(page, ALL links)       │          (4) PRINT
+        │              │                  │
+        │              ▼                  │
+        │   for each link:                │          (5) enqueue filter
+        │     normalize → in-scope? → unseen?
+        │        └─► visited.add + frontier.add
+        │              │                  │
+        └──────────────┴──────────────────┘          (6) loop
+```
+
+## Key components (roles)
+| Role | Responsibility |
+|---|---|
+| Frontier | Holds discovered-but-unprocessed URLs (FIFO queue) |
+| Visited | Dedup / cycle protection |
+| Fetcher | URL → response (HTML / skip / failure) |
+| Link extractor | HTML → list of absolute link URLs |
+| Normalizer | Canonicalize a URL (so dedup & scope are reliable) |
+| Scope | In-domain vs out-of-domain |
+| Reporter / sink | Emit "page + its links" |
+| Engine / loop | Orchestrates the above + owns the two state collections |
+
+The crucial split: the **reporter sees *all* links**, but the **frontier only receives *in-scope, unseen* links**. Printing and following are two different filters.
+
+## Resolution vs. normalization (two different jobs)
+Two link-handling steps are easy to conflate but live in **different components** and run in a fixed order:
+
+| | Resolution | Normalization / canonicalization |
+|---|---|---|
+| Turns | relative `href` + base → **absolute** URL | absolute URL → **canonical** key |
+| Owner | `LinkExtractor` (`JsoupLinkExtractor`) | `UrlNormalizer` (`StandardUrlNormalizer`) |
+| Needs context? | **yes** — the page's base URL | **no** — pure function of one URL |
+| Example | `../about` @ `https://ex.com/docs/x` → `https://ex.com/about` | `HTTP://Ex.com:80/a#frag` → `https://ex.com/a` |
+
+So **the normalizer does *not* resolve relative URLs** — by the time a link reaches it, the extractor has already made it absolute:
+
+```
+fetch ─► [RESOLVE in extractor: relative + base → absolute] ─► [CANONICALIZE in normalizer: absolute → key] ─► scope ─► visited
+```
+
+* **Why resolution lives in the extractor:** you can't resolve `../about` or `?page=2` without knowing *where you are*. The base (the page's final URL, plus any `<base href>`) is only known at extraction time — which is why `LinkExtractor.extract` takes a `baseUrl` while the normalizer's signature is the context-free `URI → Optional<URI>`.
+* **Why normalization stays pure:** a context-free function is the highest-value unit-test target (deterministic, no base, no network). Adding a base param would duplicate jsoup and wreck that.
+* **A relative URI that *does* reach the normalizer is dropped, not resolved:** `URI.create("/about")` has a `null` scheme, so the "require http/https" rule returns `Optional.empty()`. The normalizer never guesses a base.
+* **Why jsoup does the resolving:** `Jsoup.parse(html, baseUrl)` honours `<base href>`, protocol-relative `//host/x` (inherits the base's scheme), and dot-segments — cases a hand-rolled resolver gets wrong. Raw, `//cdn.example.com/x` has a null scheme and would be dropped, so it *must* be resolved upstream.
+
+Mental model: **extractor = "make every link absolute, given this page"; normalizer = "reduce an absolute URL to its one true key."**
+
+## Mapping onto the code
+Picture a second `Crawler` implementation — `SingleThreadedCrawler` — owning `ArrayDeque<URI> frontier` and `HashSet<URI> visited`, whose `crawl()` is the loop above. Same interface, same per-URL work as `ConcurrentCrawler` — just a `while` loop instead of an executor + semaphore + atomics.
+
+| Flow step | In the skeleton |
+|---|---|
+| Parse args, validate seed, wire deps, start | `CrawlCommand.call()` |
+| Carry settings | `CrawlerConfig` |
+| Fetch → 3 outcomes | `Fetcher.fetch(URI)` → `FetchResponse` |
+| Branch HTML / skip / fail | sealed `FetchResponse.Html` / `Skipped` / `Failed` |
+| Extract links | `LinkExtractor.extract(body, finalUrl)` → `List<URI>` |
+| Print page + all links | `ResultSink.accept(new CrawlResult(pageUrl, links))` |
+| Normalize a link | `UrlNormalizer.normalize(URI)` → `Optional<URI>` |
+| Scope check | `Scope.inScope(URI)` (`HostScope`) |
+| Dedup + enqueue | `visited` + `frontier` |
+
+### How it maps to `ConcurrentCrawler`
+* **`process(url)`** *is one iteration of the single-threaded loop body*: fetch → branch on `FetchResponse.Html` → `extractor.extract(...)` → `sink.accept(...)` → loop over links calling the enqueue filter. The only "concurrent" lines are `fetchWithLimit` (the semaphore) and the `pending`/`done` bookkeeping in `finally`.
+* **`submit(url)`** *is the enqueue filter*: `normalize → inScope? → visited.add (claim) → dispatch`. Concurrent `dispatch` does `pool.execute(process)`; **single-threaded, that step becomes `frontier.addLast(url)`**, and a `while (!frontier.isEmpty())` loop pulls the next URL and runs the `process`-equivalent inline. That's the entire difference.
+* **The seed** enters via the same gate (`submit(config.seed())`) — identical to "Setup".
+* **`visited::add` returning a boolean** does the "mark-visited-at-enqueue, at most once" invariant in one step. With a plain `HashSet`: `if (visited.add(u)) frontier.add(u);`.
+
+---
